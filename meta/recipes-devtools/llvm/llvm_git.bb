@@ -19,9 +19,9 @@ inherit cmake pkgconfig
 
 PROVIDES += "llvm${PV}"
 
-MAJOR_VERSION = "9"
+MAJOR_VERSION = "10"
 MINOR_VERSION = "0"
-PATCH_VERSION = "1"
+PATCH_VERSION = "0"
 
 PV = "${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION}"
 
@@ -29,7 +29,7 @@ LLVM_RELEASE = "${PV}"
 LLVM_DIR = "llvm${LLVM_RELEASE}"
 
 BRANCH = "release/${MAJOR_VERSION}.x"
-SRCREV = "c1a0a213378a458fbea1a5c77b315c7dce08fd05"
+SRCREV = "d32170dbd5b0d54436537b6b75beaf44324e0c28"
 SRC_URI = "git://github.com/llvm/llvm-project.git;branch=${BRANCH} \
            file://0006-llvm-TargetLibraryInfo-Undefine-libc-functions-if-th.patch;striplevel=2 \
            file://0007-llvm-allow-env-override-of-exe-path.patch;striplevel=2 \
