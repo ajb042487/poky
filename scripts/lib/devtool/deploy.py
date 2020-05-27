@@ -11,6 +11,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+import urllib
+import ipaddress
 
 import bb.utils
 import argparse_oe
@@ -134,6 +136,18 @@ def _prepare_remote_script(deploy, verbose=False, dryrun=False, undeployall=Fals
     return '\n'.join(lines)
 
 
+def parse_ip(args):
+    t = urllib.parse.urlparse("ssh://" + args.target)
+
+    try:
+        ip = ipaddress.ip_address(t.hostname)
+        version = ip.version
+    except ValueError:
+        # hostname instead of ip return version  0
+        version = None;
+
+    return t.username, t.hostname, t.path, version
+
 
 def deploy(args, config, basepath, workspace):
     """Entry point for the devtool 'deploy' subcommand"""
@@ -143,14 +157,7 @@ def deploy(args, config, basepath, workspace):
 
     check_workspace_recipe(workspace, args.recipename, checksrc=False)
 
-    try:
-        host, destdir = args.target.split(':')
-    except ValueError:
-        destdir = '/'
-    else:
-        args.target = host
-    if not destdir.endswith('/'):
-        destdir += '/'
+    user, host, destdir, ipversion = parse_ip(args)
 
     tinfoil = setup_tinfoil(basepath=basepath)
     try:
@@ -235,16 +242,30 @@ def deploy(args, config, basepath, workspace):
                 f.write('%d\n' % ftotalsize)
                 for fpath, fsize in filelist:
                     f.write('%s %d\n' % (fpath, fsize))
+
+            # Need to generate target as a scp format
+            if ipversion == 6:
+                target_scp = "[%s]:%s" % (host, os.path.dirname(tmpscript))
+            else:
+                target_scp = "%s:%s" % (host, os.path.dirname(tmpscript))
+            if user:
+                target_scp = "%s@%s" % (user, target_scp)
+
             # Copy them to the target
-            ret = subprocess.call("scp %s %s %s %s/* %s:%s" % (scp_sshexec, scp_port, extraoptions, tmpdir, args.target, os.path.dirname(tmpscript)), shell=True)
+            ret = subprocess.call("scp %s %s %s %s/* %s" % (scp_sshexec, scp_port, extraoptions, tmpdir, target_scp), shell=True)
             if ret != 0:
                 raise DevtoolError('Failed to copy script to %s - rerun with -s to '
                                 'get a complete error message' % args.target)
         finally:
             shutil.rmtree(tmpdir)
 
+        if user:
+            target_ssh = "%s@%s" % (user, host)
+        else:
+            target_ssh = host
+
         # Now run the script
-        ret = exec_fakeroot(rd, 'tar cf - . | %s  %s %s %s \'sh %s %s %s %s\'' % (ssh_sshexec, ssh_port, extraoptions, args.target, tmpscript, args.recipename, destdir, tmpfilelist), cwd=recipe_outdir, shell=True)
+        ret = exec_fakeroot(rd, 'tar cf - . | %s  %s %s %s \'sh %s %s %s %s\'' % (ssh_sshexec, ssh_port, extraoptions, target_ssh, tmpscript, args.recipename, destdir, tmpfilelist), cwd=recipe_outdir, shell=True)
         if ret != 0:
             raise DevtoolError('Deploy failed - rerun with -s to get a complete '
                             'error message')
@@ -268,6 +289,8 @@ def undeploy(args, config, basepath, workspace):
     elif not args.recipename and not args.all:
         raise argparse_oe.ArgumentUsageError('If you don\'t specify a recipe, you must specify -a/--all', 'undeploy-target')
 
+    user, host, destdir, ipversion = parse_ip(args)
+
     extraoptions = ''
     if args.no_host_check:
         extraoptions += '-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no'
@@ -285,8 +308,6 @@ def undeploy(args, config, basepath, workspace):
         scp_port = "-P %s" % args.port
         ssh_port = "-p %s" % args.port
 
-    args.target = args.target.split(':')[0]
-
     tmpdir = tempfile.mkdtemp(prefix='devtool')
     try:
         tmpscript = '/tmp/devtool_undeploy.sh'
@@ -294,16 +315,28 @@ def undeploy(args, config, basepath, workspace):
         # Write out the script to a file
         with open(os.path.join(tmpdir, os.path.basename(tmpscript)), 'w') as f:
             f.write(shellscript)
+
+        # Format for scp
+        if ipversion == 6:
+            target_scp = "[%s]:%s" % (host, os.path.dirname(tmpscript))
+        else:
+            target_scp = "%s:%s" % (host, os.path.dirname(tmpscript))
+        if user:
+            target_scp = "%s@%s" % (user, target_scp)
+
         # Copy it to the target
-        ret = subprocess.call("scp %s %s %s %s/* %s:%s" % (scp_sshexec, scp_port, extraoptions, tmpdir, args.target, os.path.dirname(tmpscript)), shell=True)
+        ret = subprocess.call("scp %s %s %s %s/* %s" % (scp_sshexec, scp_port, extraoptions, tmpdir, target_scp), shell=True)
         if ret != 0:
             raise DevtoolError('Failed to copy script to %s - rerun with -s to '
                                 'get a complete error message' % args.target)
     finally:
         shutil.rmtree(tmpdir)
 
+    target_ssh = host
+    if user:
+        target_ssh = "%s@%s" % (user, target_ssh)
     # Now run the script
-    ret = subprocess.call('%s %s %s %s \'sh %s %s\'' % (ssh_sshexec, ssh_port, extraoptions, args.target, tmpscript, args.recipename), shell=True)
+    ret = subprocess.call('%s %s %s %s \'sh %s %s\'' % (ssh_sshexec, ssh_port, extraoptions, target_ssh, tmpscript, args.recipename), shell=True)
     if ret != 0:
         raise DevtoolError('Undeploy failed - rerun with -s to get a complete '
                            'error message')
